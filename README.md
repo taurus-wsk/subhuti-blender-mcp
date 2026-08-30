@@ -92,9 +92,10 @@ make package   # 生成 dist/subhuti_blender_mcp.zip
   "
   ```
 
-**分发给别人**：直接发 zip，对方同样 Install from Disk 即可（需先 `pip install -e .` 安装 MCP Server 侧）。
+**分发给别人**：直接发 zip，对方 Install from Disk 即可。**zip 已内置 MCP Server 源码**（`mcp_server/` 目录），插件加载时会自动 `uv tool install` 本地源码——装插件 = 桥 + 翻译官一次到位，不用手动装 MCP Server 侧。
 
 > 修改插件源码后需重新 `make package` 再安装；已装环境可直接重新拷贝 `blender_addon/subhuti_blender_mcp.py` 覆盖后重启 Blender。
+> 修改 MCP Server 代码（`src/`）后：重新 `make package` 分发（zip 内的 `mcp_server/` 会更新），本机开发直接 `uv tool install .`。
 
 ### 2. 连通性自检
 
@@ -208,6 +209,22 @@ uv tool install .
 |---|---|---|
 | `BLENDER_MCP_HOST` | `127.0.0.1` | 监听地址（**不要**改成非回环地址，存在安全风险） |
 | `BLENDER_MCP_PORT` | `9876` | 监听端口（Blender 侧与 MCP Server 侧需一致） |
+| `SUBHUTI_MCP_PACKAGE` | `subhuti-blender-mcp` | 插件自动安装 MCP Server 时的包来源（本地开发可设为项目目录） |
+| `SUBHUTI_MCP_AUTO_SETUP` | `1` | 插件加载时是否自动安装缺失的 MCP Server（`0` 关闭，改为手动安装） |
+
+## 插件的环境自检与自动安装
+
+插件加载（register）时自动执行一次环境自检：
+
+```
+检测 subhuti-blender-mcp 命令 → 已装：打印 "MCP Server 已就绪"
+                              → 未装 + 自动安装开启：后台 uv tool install（不阻塞 Blender）
+                              → 未装 + 未找到 uv：打印手动安装指引
+```
+
+- 这样**对方只需装好插件，MCP Server 环境会自动备好**，不用手动装依赖。
+- 发布到 PyPI 前，请把 `SUBHUTI_MCP_PACKAGE` 指向你的包来源（本地项目目录或发布地址），避免从 PyPI 拉到同名第三方包。
+- 自动安装是**后台线程**执行，不阻塞 Blender 启动；失败仅打印警告，不影响插件本身。
 
 ## 安全说明
 

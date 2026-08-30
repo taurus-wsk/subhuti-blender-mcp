@@ -26,8 +26,8 @@ Subhuti Blender MCP — Blender 侧插件（HTTP 桥）
 
 bl_info = {
     "name": "Subhuti Blender MCP",
-    "author": "hezenghui",
-    "version": (0, 1, 0),
+    "author": "861522196@qq.com",
+    "version": (0, 0, 0),  # 占位符：make package 时由 pyproject.toml 自动注入
     "blender": (3, 6, 0),
     "location": "System",
     "description": "HTTP bridge for MCP: execute Python in Blender's main thread",
@@ -38,12 +38,122 @@ import bpy  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import queue  # noqa: E402
+import shutil  # noqa: E402
 import threading  # noqa: E402
 import traceback  # noqa: E402
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E402
 
 HOST = os.environ.get("BLENDER_MCP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("BLENDER_MCP_PORT", "9876"))
+
+# ---------------------------------------------------------------------------
+# MCP Server 环境自检与自动安装
+# 插件装上后自动确保"翻译官"也装好。优先级：
+#   1. 全局命令已就绪且版本与本地源码一致 → 就绪
+#   2. 插件 zip 附带的本地源码（mcp_server/）→ uv tool install 本地源码
+#   3. 回退：SUBHUTI_MCP_PACKAGE（PyPI 包名等）
+# ---------------------------------------------------------------------------
+MCP_CMD = "subhuti-blender-mcp"
+# 包来源回退：发布到 PyPI 后默认即包名；本地开发可设 SUBHUTI_MCP_PACKAGE 指向项目目录
+MCP_PACKAGE = os.environ.get("SUBHUTI_MCP_PACKAGE", "subhuti-blender-mcp")
+AUTO_SETUP = os.environ.get("SUBHUTI_MCP_AUTO_SETUP", "1") != "0"
+
+
+def _find_mcp_cmd() -> str | None:
+    """定位 MCP server 全局命令（兼容 ~/.local/bin 未加入 PATH 的情况）。"""
+    found = shutil.which(MCP_CMD)
+    if found:
+        return found
+    local = os.path.expanduser(f"~/.local/bin/{MCP_CMD}")
+    return local if os.path.exists(local) else None
+
+
+def _local_src_dir() -> str | None:
+    """插件 zip 附带的 MCP Server 源码目录（插件同级 mcp_server/）。"""
+    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_server")
+    if os.path.exists(os.path.join(d, "pyproject.toml")):
+        return d
+    return None
+
+
+def _local_src_version() -> str | None:
+    """读取本地源码的 __version__。"""
+    import re
+    init = os.path.join(_local_src_dir() or "", "src", "subhuti_blender_mcp", "__init__.py")
+    if not os.path.exists(init):
+        return None
+    try:
+        with open(init) as f:
+            m = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', f.read())
+        return m.group(1) if m else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _installed_version() -> str | None:
+    """查询已安装全局命令的版本（uv tool list）。"""
+    import subprocess
+    uv = shutil.which("uv") or os.path.expanduser("~/.local/bin/uv")
+    if not os.path.exists(uv):
+        return None
+    try:
+        out = subprocess.run([uv, "tool", "list"], capture_output=True,
+                             text=True, timeout=10).stdout
+        for line in out.splitlines():
+            if line.strip().startswith(MCP_CMD):
+                # 形如 "subhuti-blender-mcp v0.2.0"
+                return line.split("v")[-1].strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _install_async(target: str, reason: str) -> str:
+    """后台线程执行 uv tool install <target>（不阻塞 Blender 启动）。"""
+    import subprocess
+    uv = shutil.which("uv") or os.path.expanduser("~/.local/bin/uv")
+
+    def _install():
+        try:
+            proc = subprocess.run(
+                [uv, "tool", "install", target],
+                capture_output=True, text=True, timeout=300,
+            )
+            if proc.returncode == 0:
+                print(f"[Subhuti-Blender-MCP] ✅ MCP Server 安装成功: {target}")
+            else:
+                detail = (proc.stderr or proc.stdout or "")[-300:]
+                print(f"[Subhuti-Blender-MCP] ❌ MCP Server 安装失败: {detail}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[Subhuti-Blender-MCP] ❌ MCP Server 安装异常: {e}")
+
+    threading.Thread(target=_install, daemon=True).start()
+    return f"MCP Server {reason}，正在后台安装 ({target})..."
+
+
+def _ensure_mcp_env() -> str:
+    """检测 MCP Server 全局命令，缺失或版本落后时后台安装（不阻塞 Blender）。"""
+    src_dir = _local_src_dir()
+    src_ver = _local_src_version()
+
+    if _find_mcp_cmd():
+        # 已装：若附带本地源码且版本不同 → 后台更新（插件更新带动翻译官更新）
+        if src_dir and src_ver and src_ver != _installed_version():
+            return _install_async(src_dir, f"本地源码版本 {src_ver} 与已装不一致")
+        return f"MCP Server 已就绪 ({MCP_CMD})"
+
+    if not AUTO_SETUP:
+        return (f"MCP Server 未安装（自动安装已关闭）。"
+                f"请手动运行: uv tool install {MCP_PACKAGE}")
+
+    uv = shutil.which("uv") or os.path.expanduser("~/.local/bin/uv")
+    if not os.path.exists(uv):
+        return (f"MCP Server 未安装且未找到 uv，无法自动安装。"
+                f"请先安装 uv (https://docs.astral.sh/uv/) 后运行: uv tool install {MCP_PACKAGE}")
+
+    # 本地源码优先（zip 附带），否则回退包名
+    target = src_dir if src_dir else MCP_PACKAGE
+    return _install_async(target, "未安装")
 
 # ---------------------------------------------------------------------------
 # 主线程调度：请求入队 → GUI 用 timer 轮询 / 无头用主循环轮询 → 执行并回填
@@ -158,6 +268,7 @@ class _Handler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 def register():
     global _server
+    print(f"[Subhuti-Blender-MCP] {_ensure_mcp_env()}")
     if _server is not None:
         return
     try:

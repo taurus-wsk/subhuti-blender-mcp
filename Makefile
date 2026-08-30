@@ -8,6 +8,7 @@
 #   make status           查看各组件运行状态
 #   make logs             查看最近日志（当前会话）
 #   make clean            stop + 删除日志/运行时文件
+#   make package          打包插件
 
 SHELL := /bin/bash
 
