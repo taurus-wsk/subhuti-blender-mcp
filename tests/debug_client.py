@@ -1,12 +1,12 @@
 """
 开发调试客户端（HTTP 模式）
 
-配合 HTTP 调试模式使用：PyCharm 里对 mcp_server/server.py 打断点后 F5 运行
+配合 HTTP 调试模式使用：PyCharm 里对 core/mcp_server.py 打断点后 F5 运行
 （BLENDER_MCP_TRANSPORT=http），再运行本脚本触发调用，断点即可命中。
 
 用法：
-  BLENDER_MCP_TRANSPORT=http .venv/bin/python mcp_server/server.py   # 终端 1
-  .venv/bin/python tests/debug_client.py                              # 终端 2（或 PyCharm 调试）
+  BLENDER_MCP_TRANSPORT=http .venv/bin/python -m subhuti_blender_mcp   # 终端 1
+  .venv/bin/python tests/debug_client.py                               # 终端 2（或 PyCharm 调试）
 """
 
 import asyncio

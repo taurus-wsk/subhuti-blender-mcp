@@ -17,22 +17,40 @@
 - **MCP Server**：stdio 协议，把工具调用翻译成 HTTP 请求转发给 Blender。
 - **客户端**：任何 MCP 客户端（WorkBuddy、Claude Desktop、mcp inspector 等）。
 
-## 目录结构
+## 目录结构（标准 src 布局）
 
 ```
 subhuti-blender-mcp/
-├── blender_addon/
-│   └── subhuti_blender_mcp.py   # Blender 插件（HTTP 桥）—— 唯一需要装进 Blender 的文件
-├── mcp_server/
-│   └── server.py                # MCP Server（4 个工具）—— 生产入口
-├── scripts/
-│   ├── start_blender_gui.py     # 辅助：GUI 模式 + 指定 blend 文件启动
-│   └── start_blender_headless.py# 辅助：无头模式（脚本主循环常驻，供自动化）
-├── tests/
-│   ├── test_client.py           # 测试：stdio 模式端到端测试
-│   └── debug_client.py          # 测试：HTTP 模式调试客户端（配合断点）
-├── requirements.txt             # 仅 mcp>=1.2（Blender 侧零依赖）
+├── src/subhuti_blender_mcp/        # 主包（可安装、可导入）
+│   ├── __main__.py                 # 入口：python -m subhuti_blender_mcp
+│   ├── config.py                   # 配置模块（环境变量统一管理）
+│   ├── core/                       # 核心应用服务
+│   │   └── mcp_server.py           #   MCP Server 定义 + 4 个工具
+│   └── utils/                      # 基础工具
+│       └── http_client.py          #   与 Blender 桥通信的 HTTP 封装
+├── blender_addon/                  # 部署物：Blender 插件（独立于 Python 包）
+│   └── subhuti_blender_mcp.py
+├── scripts/                        # 辅助启动脚本
+│   ├── start_blender_gui.py
+│   └── start_blender_headless.py
+├── tests/                          # 测试
+│   ├── test_client.py              #   stdio 端到端测试
+│   └── debug_client.py             #   HTTP 模式调试客户端
+├── pyproject.toml                  # 构建配置（src 布局）
+├── requirements.txt
 └── README.md
+```
+
+分层职责：
+- **core/** = 核心应用服务：MCP 协议、工具定义，只关心"提供什么能力"
+- **utils/** = 基础工具：无业务语义的通用能力（HTTP 封装），可被任意模块复用
+- **config.py** = 配置集中管理，环境变量不散落在代码里
+- **blender_addon/** 单独放是因为它是部署到 Blender 的产物（import bpy，依赖 Blender 内置 Python），不属于可安装的 Python 包
+
+安装包（src 布局需要先安装才能 import）：
+
+```bash
+.venv/bin/python -m pip install -e .
 ```
 
 ## 快速开始
@@ -55,6 +73,28 @@ bpy.ops.wm.save_userpref()
 
 之后**正常双击打开 Blender 即可**，插件随启动自动加载，无需任何参数。
 也可以在 Blender 偏好设置 → 插件 → 搜索 "Subhuti Blender MCP" 勾选启用。
+
+### 1b. 打包分发（zip 一键安装）
+
+```bash
+make package   # 生成 dist/subhuti_blender_mcp.zip
+```
+
+**安装 zip（两种方式任选）：**
+- **GUI（最常用）**：Blender → 偏好设置 → 插件 → 右上角"安装(Install...)"→ 选择 zip → 勾选启用
+- **命令行**：
+  ```bash
+  /Applications/Blender.app/Contents/MacOS/Blender -b -y --python-expr "
+  import bpy, addon_utils
+  bpy.ops.preferences.addon_install(filepath='dist/subhuti_blender_mcp.zip')
+  addon_utils.enable('subhuti_blender_mcp', default_set=True, persistent=True)
+  bpy.ops.wm.save_userpref()
+  "
+  ```
+
+**分发给别人**：直接发 zip，对方同样 Install from Disk 即可（需先 `pip install -e .` 安装 MCP Server 侧）。
+
+> 修改插件源码后需重新 `make package` 再安装；已装环境可直接重新拷贝 `blender_addon/subhuti_blender_mcp.py` 覆盖后重启 Blender。
 
 ### 2. 连通性自检
 
@@ -82,19 +122,35 @@ curl --noproxy '*' http://127.0.0.1:9876/health
 .venv/bin/python scripts/start_blender_headless.py /Users/hezenghui/Public/blender/cli_test.blend
 ```
 
+## Makefile 管理（启动 / 关闭 / 状态 / 日志）
+
+```bash
+make run-logs          # ★ 前台日志模式：启动 + 日志实时滚动，Ctrl+C 统一关闭（推荐日常）
+make start             # 后台启动 Blender(GUI) + MCP Server(HTTP)，启动前自动清理残留实例
+make start-headless    # 同上，但 Blender 无头模式（自动化/CI）
+make stop              # 彻底关闭所有相关进程（SIGTERM + 兜底 SIGKILL）
+make status            # 查看各组件运行状态
+make logs              # 查看当前会话日志
+make clean             # stop + 删除日志/运行时文件
+```
+
+- **自动清理**：所有 `start*`/`run-logs` 都会先执行 `stop`，把其他位置启动的 Blender 桥和 MCP Server 实例关掉，避免端口冲突。
+- **日志模式**：`run-logs` 前台运行，Blender 与 MCP Server 的输出实时滚动打印到终端，同时落盘 `logs/blender.log` 与 `logs/mcp.log`（每次启动自动清空旧日志）；`make logs` 查看历史、`make status` 看运行状态。
+- 指定文件：`make run-logs BLEND_FILE=/path/to/file.blend`
+
 ## 开发调试（PyCharm 里断点调试 MCP）
 
 MCP Server 支持两种传输模式，生产用 stdio，**开发调试用 HTTP**（PyCharm 直接 F5 运行 + 打断点）：
 
 ```bash
 # 终端 1：以 HTTP 模式启动 server（默认 127.0.0.1:8100/mcp）
-BLENDER_MCP_TRANSPORT=http .venv/bin/python mcp_server/server.py
+BLENDER_MCP_TRANSPORT=http .venv/bin/python -m subhuti_blender_mcp
 
 # 终端 2 / PyCharm 调试：触发调用（server 端断点会命中）
 .venv/bin/python tests/debug_client.py
 ```
 
-- 在 PyCharm 里：`server.py` 中任意工具函数打断点 → F5 运行（配置环境变量 `BLENDER_MCP_TRANSPORT=http`）→ 运行 `tests/debug_client.py` 触发 → 断点命中、可单步。
+- 在 PyCharm 里：`core/mcp_server.py` 中任意工具函数打断点 → F5 运行（配置环境变量 `BLENDER_MCP_TRANSPORT=http`，入口选 `__main__.py`）→ 运行 `tests/debug_client.py` 触发 → 断点命中、可单步。
 - 也可以用官方 Inspector 可视化调试：`npx @modelcontextprotocol/inspector` 后连接 `http://127.0.0.1:8100/mcp`。
 - 调试**建模代码**：在 PyCharm 里把 bpy 代码片段作为字符串传给 `blender_run_code`，返回的 stdout 就是 Blender 里 print 的输出；建模逻辑写在 `tests/debug_client.py` 里可以全程打断点。
 
@@ -118,7 +174,11 @@ BLENDER_MCP_TRANSPORT=http .venv/bin/python mcp_server/server.py
   "mcpServers": {
     "blender-mcp": {
       "command": "/Users/hezenghui/PycharmProjects/subhuti-blender-mcp/.venv/bin/python",
-      "args": ["/Users/hezenghui/PycharmProjects/subhuti-blender-mcp/mcp_server/server.py"]
+      "args": ["-m", "subhuti_blender_mcp"],
+      "env": {
+        "BLENDER_MCP_HOST": "127.0.0.1",
+        "BLENDER_MCP_PORT": "9876"
+      }
     }
   }
 }

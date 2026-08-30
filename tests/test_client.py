@@ -1,9 +1,9 @@
 """
-端到端测试客户端：用官方 MCP SDK 启动 server.py（stdio），
+端到端测试客户端：用官方 MCP SDK 启动 MCP Server（stdio），
 依次调用所有工具验证与 Blender 的连通性。
 
 前置：Blender 已启动并加载插件（见 README）。
-运行：.venv/bin/python test_client.py
+运行：.venv/bin/python tests/test_client.py
 """
 
 import asyncio
@@ -15,7 +15,6 @@ from mcp.client.stdio import stdio_client
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-SERVER = os.path.join(ROOT, "mcp_server", "server.py")
 
 
 async def call(session: ClientSession, name: str, args: dict) -> str:
@@ -26,7 +25,8 @@ async def call(session: ClientSession, name: str, args: dict) -> str:
 
 
 async def main() -> None:
-    params = StdioServerParameters(command=sys.executable, args=[SERVER])
+    # 以 python -m subhuti_blender_mcp 方式启动（包已 editable 安装）
+    params = StdioServerParameters(command=sys.executable, args=["-m", "subhuti_blender_mcp"])
 
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:

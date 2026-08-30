@@ -1,6 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "subhuti-blender-mcp"
-version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.13"
-dependencies = []
+version = "0.2.0"
+description = "MCP Server bridging to local Blender via an HTTP bridge addon"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.2",
+]
+
+[project.scripts]
+subhuti-blender-mcp = "subhuti_blender_mcp.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

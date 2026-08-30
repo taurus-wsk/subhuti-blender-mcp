@@ -1,23 +1,15 @@
-"""
-Subhuti Blender MCP — MCP Server（stdio 模式）
+"""核心应用服务：MCP Server 定义与 Blender 控制工具。
 
-通过 HTTP 桥转发到正在运行的 Blender 进程。由 MCP 客户端（如 WorkBuddy、
-Claude Desktop、mcp inspector）以子进程方式启动。
-
-运行：  python mcp_server/server.py
-测试：  python test_client.py
+所有工具通过 utils.http_client 转发到 Blender 插件（HTTP 桥），
+由插件在 Blender 主线程执行实际的 bpy 操作。
 """
 
-import json
-import os
-import urllib.request
+from __future__ import annotations
 
 from mcp.server.mcpserver import MCPServer
 
-HOST = os.environ.get("BLENDER_MCP_HOST", "127.0.0.1")
-PORT = int(os.environ.get("BLENDER_MCP_PORT", "9876"))
-BASE = f"http://{HOST}:{PORT}"
-RPC_TIMEOUT = 180  # Blender 长操作（如渲染）需要更久
+from .. import config
+from ..utils.http_client import request
 
 mcp = MCPServer(
     "blender-mcp",
@@ -28,25 +20,11 @@ mcp = MCPServer(
 )
 
 
-def _http(method: str, path: str, payload: dict | None = None, timeout: float = 30.0) -> dict:
-    if method == "GET":
-        req = urllib.request.Request(f"{BASE}{path}", method="GET")
-    else:
-        req = urllib.request.Request(
-            f"{BASE}{path}",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-        return json.loads(resp.read().decode("utf-8"))
-
-
 @mcp.tool()
 def blender_status() -> str:
     """检查与 Blender 的连接状态，返回 Blender 版本等基本信息。"""
     try:
-        info = _http("GET", "/health", timeout=5)
+        info = request("GET", "/health", timeout=5)
         return (
             f"✅ 已连接 Blender {info['blender']} "
             f"(无头模式={info['background']}, 端口={info['port']})"
@@ -65,7 +43,7 @@ def blender_run_code(code: str) -> str:
       print('created:', bpy.context.object.name)
     """
     try:
-        res = _http("POST", "/rpc", {"code": code}, timeout=RPC_TIMEOUT)
+        res = request("POST", "/rpc", {"code": code}, timeout=config.RPC_TIMEOUT)
     except Exception as e:  # noqa: BLE001
         return f"请求失败: {e}"
     if not res.get("ok"):
@@ -111,21 +89,3 @@ def blender_object_info(object_name: str) -> str:
         "        print('materials:', [m.name if m else None for m in o.data.materials])\n"
     ) % (object_name, object_name)
     return blender_run_code(code)
-
-
-if __name__ == "__main__":
-    # 传输模式切换（供开发调试）：
-    #   stdio  -> 生产默认，由 MCP 客户端以子进程方式启动
-    #   http   -> 开发调试，PyCharm 里直接 F5 运行可打断点，
-    #             配合 debug_client.py / mcp inspector 触发调用
-    transport = os.environ.get("BLENDER_MCP_TRANSPORT", "stdio")
-    if transport == "http":
-        http_port = int(os.environ.get("BLENDER_MCP_HTTP_PORT", "8100"))
-        print(f"[blender-mcp] HTTP 调试模式: http://127.0.0.1:{http_port}/mcp")
-        mcp.run(
-            transport="streamable-http",
-            host="127.0.0.1",
-            port=http_port,
-        )
-    else:
-        mcp.run()  # 默认 stdio

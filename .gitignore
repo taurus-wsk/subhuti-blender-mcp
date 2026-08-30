@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# 虚拟环境
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+# 运行产物（Makefile 管理）
+logs/
+.run/
+
+# 临时/预览产物
+preview_*.png
