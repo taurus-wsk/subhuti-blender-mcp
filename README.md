@@ -167,14 +167,26 @@ BLENDER_MCP_TRANSPORT=http .venv/bin/python -m subhuti_blender_mcp
 
 ### WorkBuddy（本机）
 
-编辑 `~/.workbuddy/mcp.json`（如不存在则创建）：
+**第一步：把 MCP Server 装成全局命令（一次性）**
+
+```bash
+# 安装全局命令 subhuti-blender-mcp（依赖自动装进独立环境，不污染项目 venv）
+uv tool install .
+
+# 把 ~/.local/bin 加入 PATH（或 uv tool update-shell），之后可直接使用该命令
+```
+
+> 不装全局命令也可以：直接用项目 venv 方式（`command` 指到 `.venv/bin/python`，`args` 为 `["-m", "subhuti_blender_mcp"]`）。
+> 改了 server 源码后重新执行 `uv tool install .` 即可更新全局命令。
+
+**第二步：编辑 `~/.workbuddy/mcp.json`（如不存在则创建）：**
 
 ```json
 {
   "mcpServers": {
     "blender-mcp": {
-      "command": "/Users/hezenghui/PycharmProjects/subhuti-blender-mcp/.venv/bin/python",
-      "args": ["-m", "subhuti_blender_mcp"],
+      "command": "/Users/hezenghui/.local/bin/subhuti-blender-mcp",
+      "args": [],
       "env": {
         "BLENDER_MCP_HOST": "127.0.0.1",
         "BLENDER_MCP_PORT": "9876"
